@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+<style>
+div.centerImage {
+	text-align: center;
+	float: left;
+	width: 46vw;
+}
+header {
+  background-color: #666;
+  padding: 30px;
+  text-align: center;
+  font-size: 10px;
+  color: white;
+}
+nav {
+  float: left;
+  width: 10%;
+  height: 600px;
+  background: #ccc;
+  padding: 20px;
+}
+article {
+  float: left;
+  padding: 20px;
+  width: 70%;
+  background-color: #f1f1f1;
+  height: 600px; /* only for demonstration, should be removed */
+}
+table, th, td {
+  border: 1px solid black;
+}
+
+table, th, td {
+	text-align:center;
+	border: 1px solid black;
+	border-collapse: collapse;
+}
+
+th, td {
+  padding: 10px;
+  text-align: center;
+}
+div {
+  background-color:yellow;
+  visibility:hidden;
+}
+</style>
+</head>
+
+<body> 
+<header>
+	<h1 style="text-align:center;color:white">
+	  訂單送貨服務
+	</h1>
+</header>
+<hr>
+<nav></nav>
+<article>
+	<table style="text-align:center;width:100%;">
+	  <tr>
+		<th>訂貨人</th>
+		<th>貨物</th>
+		<th>送貨</th> 
+	  </tr>
+	  <tr>
+		<td>Jill</td>
+		<td>杯子</td>
+		<td><input type="checkbox" name="first" value=""></td>	
+	  </tr>
+	  <tr>
+		<td>Eve</td>
+		<td>餐具組</td> 
+		<td><input type="checkbox" name="second" value=""></td> 
+	  </tr>
+	</table>
+	<button id='button1' type="button" style="width:100px;height:50px;position:relative;top:100px;left:30%;">開始送貨</button>
+	<button id='button2' type="button" onclick="javascript:location.href='http://jason870509.github.io/Cannon_ar/ar_road.html'" style="width:100px;height:50px;position:relative;top:100px;left:50%;display:none;">觀看送貨</button>
+</article>
+<nav></nav>
+	
+<script src="https://code.jquery.com/jquery-2.1.4.min.js"></script>
+<script>
+	$('#button1').click(function() {
+		//console.log($('#button2').hide());
+		$('#button2').show();
+		
+	})
+
+</script>
+</body>
+
+</html>
+

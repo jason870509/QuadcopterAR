@@ -1,0 +1,1140 @@
+<!DOCTYPE html>
+
+<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+<!-- three.js library -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/109/three.min.js"></script>
+<script src="https://threejs.org/examples/js/controls/OrbitControls.js">
+</script>
+<script src="build/stats.min.js"></script>
+<!-- jsartookit -->
+<script src="vendor/artoolkit.min.js"></script>
+<script src="vendor/artoolkit.api.js"></script>
+<!-- include threex.artoolkit -->
+<script src="src/threex/threex-artoolkitsource.js"></script>
+<script src="src/threex/threex-artoolkitcontext.js"></script>
+<script src="src/threex/threex-arbasecontrols.js"></script>
+<script src="src/threex/threex-armarkercontrols.js"></script>
+<script src="src/threex/threex-arsmoothedcontrols.js"></script>
+
+<script src="https://jyunming-chen.github.io/tutsplus/js/KeyboardState.js"></script>
+<script src="https://raw.githack.com/mrdoob/three.js/dev/examples/js/misc/Gyroscope.js"></script>
+<script src="build/cannon.js"></script>
+<script src="https://code.jquery.com/jquery-2.1.4.min.js"></script>
+<script src="qcommon.js"></script>
+<script src="qangles.js"></script>
+<script src="qservo.js"></script>
+<script src="ar.js"></script>
+<script src="https://rawgit.com/mrdoob/three.js/master/examples/js/loaders/MTLLoader.js"></script>
+<script src="https://rawgit.com/mrdoob/three.js/master/examples/js/loaders/OBJLoader.js"></script>
+<div style='font-size:2em;position: absolute; top: 10px; width:100%; text-align: center; z-index: 1;'>
+	 AR Quadcopter
+</div>
+<script>
+var deltaTime = 0, totalTime = 0
+var omega, omega0, omega1, omega2, omega3;
+const SIZE = 1;
+const RATIO = 1.0003;
+var omegaGain = 1.0;
+var omegaHover;
+const PROP_KK = 0.1;
+var yref = 2;   
+var turning = false;
+var rolling = false;
+var rYaw = 0;
+var rRoll = 0;
+var rPitch = 0;
+var yawAngle = 0, yawRef = 0;
+var rollAngle = 0, rollRef = 0;
+var pitchAngle = 0, pitchRef = 0;
+var gyro;
+// global variables
+var renderer, scene, camera, stats;
+var clock
+var markerKanji, markerHiro, markerA;
+var arToolKitSource, arToolKitContext;
+var directionalLight;
+var raycaster, pickables;
+var _iOSDevice;
+var changeMarker = false, changeMarker2 = false;
+var getGoods = true, flyUp = true, arrived = false;
+var first = 1, first2 = 1;
+var maxVelocity=0.1;
+var moveLength=new THREE.Vector3(0, 0, 0);
+var firstStep = false, secondStep = false
+var theObject4;
+var carTurn = false, carFirst = true;
+var smoothedRoot, smoothedControls;
+var smoothedRoot2, smoothedControls2;
+var smoothedRoot3, smoothedControls3;
+init();
+animate();
+
+function init() {
+	clock = new THREE.Clock();
+	let _iOSDevice = !!navigator.platform.match(/iPhone|iPod|iPad/);
+
+	console.log ('iOS: ' + _iOSDevice)
+
+
+	// init renderer
+    initCannon();
+	omegaHover = Math.sqrt ( body.mass * world.gravity.length()/4/PROP_KK );
+	renderer	= new THREE.WebGLRenderer({
+		// antialias	: true,
+		alpha: true
+	});
+	renderer.shadowMap.type = THREE.PCFSoftShadowMap
+	renderer.shadowMap.enabled = true;
+	renderer.setClearColor(new THREE.Color('lightgrey'), 0)
+	// renderer.setPixelRatio( 1/2 );
+	renderer.setSize( window.innerWidth, window.innerHeight );
+	renderer.domElement.style.position = 'absolute'
+	renderer.domElement.style.top = '0px'
+	renderer.domElement.style.left = '0px'
+	document.body.appendChild( renderer.domElement );
+
+	// init scene and camera
+	scene	= new THREE.Scene();
+
+	var ambient = new THREE.AmbientLight( 0x666666 );
+	scene.add( ambient );
+
+	directionalLight = new THREE.DirectionalLight( 'white' );
+	directionalLight.position.set( 1, 5, 0.3 ).setLength(2)
+
+	directionalLight.shadow.mapSize.set(128,128)
+	directionalLight.shadow.camera.bottom = -0.6
+	directionalLight.shadow.camera.top = 0.6
+	directionalLight.shadow.camera.right = 0.6
+	directionalLight.shadow.camera.left = -0.6
+	directionalLight.castShadow = true;
+	//scene.add(new THREE.CameraHelper( directionalLight.shadow.camera ))
+	scene.add( directionalLight );	
+	//////////////////////////////////////////////////////////////////////////////////
+	//		Initialize a basic camera
+	//////////////////////////////////////////////////////////////////////////////////
+
+	// Create a camera
+	camera = new THREE.Camera();
+	scene.add(camera);
+
+	////////////////////////////////////////////////////////////////////////////////
+	//          handle arToolkitSource
+	////////////////////////////////////////////////////////////////////////////////
+
+	arToolkitSource = new THREEx.ArToolkitSource({
+		// to read from the webcam 
+		sourceType : 'webcam',
+
+		// to read from an image
+		// sourceType : 'image',
+		// sourceUrl : THREEx.ArToolkitContext.baseURL + '../data/images/img.jpg',		
+
+		// to read from a video
+		// sourceType : 'video',
+		// sourceUrl : THREEx.ArToolkitContext.baseURL + '../data/videos/headtracking.mp4',		
+	})
+
+	arToolkitSource.init(function onReady(){
+		onResize()
+	})
+	
+	// handle resize
+	window.addEventListener('resize', function(){
+		onResize()
+	})
+	function onResize(){
+		arToolkitSource.onResize()	
+		arToolkitSource.copySizeTo(renderer.domElement)	
+		if( arToolkitContext.arController !== null ){
+			arToolkitSource.copySizeTo(arToolkitContext.arController.canvas)	
+		}	
+	}
+	////////////////////////////////////////////////////////////////////////////////
+	//          initialize arToolkitContext
+	////////////////////////////////////////////////////////////////////////////////
+	
+	arToolkitContext = new THREEx.ArToolkitContext({
+		//cameraParametersUrl: 'data/camera_para.dat',
+		cameraParametersUrl: THREEx.ArToolkitContext.baseURL + '../data/data/camera_para.dat',
+		detectionMode: 'mono',
+		maxDetectionRate: 30,
+		canvasWidth: 80*3,
+		canvasHeight: 60*3,
+	})
+	// initialize it
+	arToolkitContext.init(function onCompleted(){
+		// copy projection matrix to camera
+		camera.projectionMatrix.copy( arToolkitContext.getProjectionMatrix() );
+	})
+	markerA = addMarkerA();
+	scene.add(markerA);
+	markerKanji = addMarkerKanji();
+	scene.add (markerKanji);
+	markerHiro = addMarkerHiro();
+	scene.add (markerHiro); 
+	
+	
+	stats = new Stats();
+	document.body.appendChild( stats.dom );
+
+
+	readModel();
+
+}
+
+function createAirplane(){
+	let loader = new THREE.TextureLoader();
+	loader.crossOrigin = '';
+	var airplane = new THREE.Group();
+	texture = loader.load('https://i.imgur.com/qr8kAad.png');
+	var box = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 7), new THREE.MeshBasicMaterial({
+		color: 0xffffff, 
+		map: texture
+	}));
+	airplane.add(box)
+	box.castShadow = true;
+	box.receiveShadow = true;
+	//////////////////////////////////////////boxLinks
+	let boxLinks = []
+	for (i = 0; i < 4; i++) {
+		boxLinks[i] = new THREE.Mesh(new THREE.BoxGeometry(3, 1, 0.2), new THREE.MeshBasicMaterial({
+		  color: 0x333333,
+		  map: texture
+		}));
+		airplane.add(boxLinks[i])
+		boxLinks[i].castShadow = true;
+		boxLinks[i].receiveShadow = true;
+	}
+	boxLinks[0].position.set(-2.5, 0, 3.0)
+	boxLinks[0].rotation.y = Math.PI / 4
+	boxLinks[1].position.set(-2.5, 0, -3.0)
+	boxLinks[1].rotation.y = -Math.PI / 4
+	boxLinks[2].position.set(2.5, 0, -3.0)
+	boxLinks[2].rotation.y = Math.PI / 4
+	boxLinks[3].position.set(2.5, 0, 3.0)
+	boxLinks[3].rotation.y = -Math.PI / 4
+	//////////////////////////////////////////motorSides
+	let motorSides = []
+	material = new THREE.MeshBasicMaterial({
+		color: 0x333333,
+		side: THREE.DoubleSide,
+		map: texture
+	})
+	motorSides[0] = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.5, 50, 2, true, 4, 2.5), material)
+	motorSides[0].position.set(-4, 1, 4)
+	motorSides[1] = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.5, 50, 2, true, 2.8, 2.5), material)
+	motorSides[1].position.set(-4, 1, -4)
+	motorSides[2] = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.5, 50, 2, true, 1, 2.5), material)
+	motorSides[2].position.set(4, 1, -4)
+	motorSides[3] = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.5, 50, 2, true, -0.5, 2.5), material)
+	motorSides[3].position.set(4, 1, 4)
+	for (i = 0; i < 4; i++) {
+		airplane.add(motorSides[i])
+		motorSides[i].castShadow = true;
+		motorSides[i].receiveShadow = true;
+	}
+	//////////////////////////////////////////motorCenters
+	let motorCenters = [], motorCenters2 = []
+	for (i = 0; i < 4; i++) {
+		motorCenters[i] = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 3.5, 50), new THREE.MeshBasicMaterial({
+			color: 0xCCCCCC, 
+			map: texture
+		}));
+		airplane.add(motorCenters[i])
+		motorCenters[i].castShadow = true;
+		motorCenters[i].receiveShadow = true;
+	}
+	motorCenters[0].position.set(-4, 0, 4)
+	motorCenters[1].position.set(-4, 0, -4)
+	motorCenters[2].position.set(4, 0, -4)
+	motorCenters[3].position.set(4, 0, 4)
+	for (i = 0; i < 4; i++) {
+		motorCenters2[i] = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 3, 50, 2, true), new THREE.MeshBasicMaterial({
+		color: 0x333333, 
+		map: texture
+	}));
+		airplane.add(motorCenters2[i])
+		motorCenters2[i].castShadow = true;
+		motorCenters2[i].receiveShadow = true;
+	}
+	motorCenters2[0].position.set(-4, -0.5, 4)
+	motorCenters2[1].position.set(-4, -0.5, -4)
+	motorCenters2[2].position.set(4, -0.5, -4)
+	motorCenters2[3].position.set(4, -0.5, 4)
+	//////////////////////////////////////////motorLinks
+	let motorLinks = []
+	for (i = 0; i < 8; i++) {
+		motorLinks[i] = new THREE.Mesh(new THREE.BoxGeometry(4.5, 0.4, 0.2), new THREE.MeshBasicMaterial({
+			color: 0x333333,
+			map: texture
+		}));
+		airplane.add(motorLinks[i])
+		motorLinks[i].castShadow = true;
+		motorLinks[i].receiveShadow = true;
+	}
+	motorLinks[0].position.set(-6, 0, 4)
+	motorLinks[1].position.set(-6, 0, -4)
+	motorLinks[2].position.set(6, 0, -4)
+	motorLinks[3].position.set(6, 0, 4)
+	motorLinks[0].rotation.z = -Math.PI / 6
+	motorLinks[1].rotation.z = -Math.PI / 6
+	motorLinks[2].rotation.z = Math.PI / 6
+	motorLinks[3].rotation.z = Math.PI / 6
+	motorLinks[4].position.set(-4, 0, 6)
+	motorLinks[4].rotation.y = -Math.PI / 2
+	motorLinks[4].rotation.x = -Math.PI / 6
+	motorLinks[5].position.set(-4, 0, -6)
+	motorLinks[5].rotation.y = -Math.PI / 2
+	motorLinks[5].rotation.x = Math.PI / 6
+	motorLinks[6].position.set(4, 0, -6)
+	motorLinks[6].rotation.y = -Math.PI / 2
+	motorLinks[6].rotation.x = Math.PI / 6
+	motorLinks[7].position.set(4, 0, 6)
+	motorLinks[7].rotation.y = -Math.PI / 2
+	motorLinks[7].rotation.x = -Math.PI / 6
+	//////////////////////////////////////////motors
+	var motors = []
+	motorTexture = loader.load('https://i.imgur.com/yCho2gY.png');
+	for(i=0;i<4;i++){
+		motors[i] = new THREE.Mesh(new THREE.PlaneGeometry(7.5, 1), new THREE.MeshPhongMaterial({map:motorTexture,transparent: true, side:THREE.DoubleSide}))
+		motors[i].rotation.x = -Math.PI / 2
+		airplane.add(motors[i])	
+		motors[i].castShadow = true;
+		motors[i].receiveShadow = true;
+	}
+	motors[0].position.set(-4, 1, 4)
+	motors[1].position.set(-4, 1, -4)
+	motors[2].position.set(4, 1, -4)
+	motors[3].position.set(4, 1, 4)
+	return airplane
+}
+
+function addMarkerKanji () {
+	let markerRootKanji = new THREE.Group();
+
+	//airplane.position.set(0,2,0)
+	var artoolkitMarker = new THREEx.ArMarkerControls(arToolkitContext, markerRootKanji, {
+		type : 'pattern',
+		//patternUrl : 'data/kanji.patt'
+		patternUrl : THREEx.ArToolkitContext.baseURL + '../data/data/patt.kanji'
+	})
+
+	kanjiAirplane = createAirplane();
+	
+	//markerRootKanji.add (kanjiAirplane);
+	let loader = new THREE.TextureLoader();
+	loader.crossOrigin = '';
+	let matArray = [];
+	matArray.push(new THREE.MeshBasicMaterial({
+		color:0x888888,
+		map: loader.load('https://i.imgur.com/CWHuQSW.jpg') // 1
+	}));
+	matArray.push(new THREE.MeshBasicMaterial( { 
+	color:0x888888,
+		map: loader.load( 'https://i.imgur.com/CWHuQSW.jpg' ) //6
+	}));
+	matArray.push(new THREE.MeshBasicMaterial({
+	color:0x888888,
+		map: loader.load('https://i.imgur.com/JdsarC2.jpg') //2
+	}));
+	matArray.push(new THREE.MeshBasicMaterial({
+	color:0x888888,
+		map: loader.load('https://i.imgur.com/JdsarC2.jpg') //5
+	}));
+	matArray.push(new THREE.MeshBasicMaterial({
+	color:0x888888,
+		map: loader.load('https://i.imgur.com/AW9onLK.jpg') //3
+	}));
+	matArray.push(new THREE.MeshBasicMaterial({
+	color:0x888888,
+		map: loader.load('https://i.imgur.com/AW9onLK.jpg') //4
+	}));
+	kanjiBox = new THREE.Mesh(new THREE.BoxGeometry(5, 5, 5), matArray);
+	kanjiBox.scale.set(0.08,0.08,0.08)
+	//kanjiBox.position.y = 2;
+	//markerRootKanji.add (kanjiBox);
+	//kanjiBox.rotation.z = Math.PI / 2
+	
+	kanjiAirplane.position.y = 0.5;
+	kanjiAirplane.scale.set(0.05,0.05,0.05)
+	markerRootKanji.add (kanjiAirplane);
+	//smoothedRoot.add (kanjiAirplane);
+	// point the directionalLight to the marker
+	directionalLight.target = kanjiAirplane
+	
+
+	let goods = new THREE.Mesh( new THREE.BoxGeometry(0.6,0.3,0.4), matArray);	
+	goods.scale.set(0.5, 0.5,0.5)
+	//goods.position.y = 1.25/2;
+	goods.castShadow = true;
+	goods.receiveShadow = true;
+	markerRootKanji.add(goods);
+	//smoothedRoot.add (goods);
+	var geometry2 = new THREE.PlaneGeometry(15, 15)
+	var material2 = new THREE.ShadowMaterial({visible:false});
+	var material3 = new THREE.ShadowMaterial();
+	material2.opacity = 0.7; 
+	var planeMesh = new THREE.Mesh( geometry2, material2);
+	planeMesh.receiveShadow = true;
+	planeMesh.depthWrite = false;
+	planeMesh.rotation.x = -Math.PI/2
+	//smoothedRoot.add (planeMesh);
+
+	var planeMesh2 = new THREE.Mesh( new THREE.PlaneGeometry(15, 15), material3);
+	material3.opacity = 0.7; 
+	planeMesh2.receiveShadow = true;
+	planeMesh2.depthWrite = false;
+	planeMesh2.rotation.x = -Math.PI/2
+	markerRootKanji.add(planeMesh2);
+	markerRootKanji.add(planeMesh);
+	var roadTex = loader.load( 'https://i.imgur.com/c1dswCQ.jpg' );
+	var road = new THREE.Mesh(new THREE.PlaneGeometry(10, 2), new THREE.MeshBasicMaterial({map:roadTex}));
+	road.receiveShadow = true;
+	road.rotation.x = -Math.PI/2
+	//markerRootKanji.add(road);
+
+	road.position.set(-3, 0, 0)
+	road.scale.set(0.5,0.5,0.5)
+	return markerRootKanji;
+}
+
+function addMarkerHiro(){
+	let markerRoot = new THREE.Group()
+
+	var artoolkitMarker = new THREEx.ArMarkerControls(arToolkitContext, markerRoot, {
+		type : 'pattern',
+		//patternUrl : 'data/hiro.patt'
+		patternUrl : THREEx.ArToolkitContext.baseURL + '../data/data/patt.hiro'
+	})
+	////////////////////////////////////////////
+	// build a smoothedControls
+	smoothedRoot2 = new THREE.Group()
+	scene.add(smoothedRoot2)
+	smoothedControls2 = new THREEx.ArSmoothedControls(smoothedRoot2, {
+		lerpPosition: 0.4,
+		lerpQuaternion: 0.3,
+		lerpScale: 1,
+	})
+	
+	//////////////////////////////////
+	hiroAirplane = createAirplane();
+	//hiroAirplane.children[0].material.color.setHex( 0x29e2f0 );
+	//markerRoot.add (hiroAirplane);
+	let loader = new THREE.TextureLoader();
+	loader.crossOrigin = '';
+	let matArray = [];
+	matArray.push(new THREE.MeshBasicMaterial({
+		color:0x888888,
+		map: loader.load('https://i.imgur.com/CWHuQSW.jpg') // 1
+	}));
+	matArray.push(new THREE.MeshBasicMaterial( { 
+	color:0x888888,
+		map: loader.load( 'https://i.imgur.com/CWHuQSW.jpg' ) //6
+	}));
+	matArray.push(new THREE.MeshBasicMaterial({
+	color:0x888888,
+		map: loader.load('https://i.imgur.com/JdsarC2.jpg') //2
+	}));
+	matArray.push(new THREE.MeshBasicMaterial({
+	color:0x888888,
+		map: loader.load('https://i.imgur.com/JdsarC2.jpg') //5
+	}));
+	matArray.push(new THREE.MeshBasicMaterial({
+	color:0x888888,
+		map: loader.load('https://i.imgur.com/AW9onLK.jpg') //3
+	}));
+	matArray.push(new THREE.MeshBasicMaterial({
+	color:0x888888,
+		map: loader.load('https://i.imgur.com/AW9onLK.jpg') //4
+	}));
+	hiroBox = new THREE.Mesh(new THREE.BoxGeometry(5, 5, 5), matArray);
+	hiroBox.visible = false
+	hiroBox.scale.set(0.08,0.08,0.08)
+	//markerRoot.add (hiroBox);
+	
+
+	
+	hiroAirplane.visible = false
+	//hiroAirplane.position.y = 2;
+	hiroAirplane.scale.set(0.05,0.05,0.05)
+	//hiroAirplane.rotation.x = - Math.PI / 2
+	//hiroAirplane.rotation.y = - Math.PI / 2
+	//markerRoot.add (hiroAirplane);
+	smoothedRoot2.add(hiroAirplane);
+	// point the directionalLight to the marker
+	
+	let goods = new THREE.Mesh( new THREE.BoxGeometry(0.6,0.3,0.4), matArray);	
+	goods.scale.set(0.5, 0.5,0.5)
+	//goods.position.y = 1.25/2;
+	//goods.visible = true;
+	goods.position.y = -1000;
+	goods.castShadow = true;
+	goods.receiveShadow = true;
+	//markerRoot.add(goods);
+	smoothedRoot2.add(goods);
+	// add a transparent ground-plane shadow-receiver
+	var material = new THREE.ShadowMaterial({visible:false});
+	var material2 = new THREE.ShadowMaterial();
+	//var material = new THREE.MeshLambertMaterial({color:0xffff00, side:THREE.DoubleSide});
+	material.opacity = 0.7; //! bug in threejs. can't set in constructor
+	var geometry = new THREE.PlaneGeometry(30, 30) // should be large enough
+	var planeMesh = new THREE.Mesh( geometry, material);
+	planeMesh.visible = false;
+	//planeMesh.receiveShadow = true;
+	//planeMesh.depthWrite = false;
+	planeMesh.rotation.x = -Math.PI/2
+	//markerRoot.add(planeMesh);	
+	smoothedRoot2.add(planeMesh);
+
+	var planeMesh2 = new THREE.Mesh( new THREE.PlaneGeometry(15, 15), material2);
+	planeMesh2.receiveShadow = true;
+	planeMesh2.depthWrite = false;
+	planeMesh2.rotation.x = -Math.PI/2
+	markerRoot.add(planeMesh2);
+	var roadTex = loader.load( 'https://i.imgur.com/c1dswCQ.jpg' );
+	var road = new THREE.Mesh(new THREE.PlaneGeometry(6, 2), new THREE.MeshBasicMaterial({map:roadTex}));
+	road.receiveShadow = true;
+	road.rotation.x = -Math.PI/2
+	//markerRoot.add(road);
+
+	road.position.set(0, 0, 2)
+	road.rotation.z =  -Math.PI / 2
+	road.scale.set(0.5,0.5,0.5)	
+		
+	return markerRoot;
+}	
+
+function addMarkerA(){
+	let markerA = new THREE.Group()
+
+	var artoolkitMarker = new THREEx.ArMarkerControls(arToolkitContext, markerA, {
+		type : 'pattern',
+		patternUrl : 'data/letterA.patt'
+	})
+	////////////////////////////////////////////
+	// build a smoothedControls
+	smoothedRoot3 = new THREE.Group()
+	scene.add(smoothedRoot3)
+	smoothedControls3 = new THREEx.ArSmoothedControls(smoothedRoot3, {
+		lerpPosition: 0.4,
+		lerpQuaternion: 0.3,
+		lerpScale: 1,
+	})
+	
+	//////////////////////////////////
+	aAirplane = createAirplane();
+	//hiroAirplane.children[0].material.color.setHex( 0x29e2f0 );
+	smoothedRoot3.add (aAirplane);
+	aAirplane.visible = false;
+	aAirplane.position.y = 0.5;
+	aAirplane.scale.set(0.05,0.05,0.05)
+	aAirplane.rotation.x = - Math.PI / 2
+	aAirplane.rotation.y = - Math.PI / 2
+	// point the directionalLight to the marker
+	//directionalLight.target = mesh
+	let loader = new THREE.TextureLoader();
+	loader.crossOrigin = '';
+	let matArray = [];
+	matArray.push(new THREE.MeshBasicMaterial({
+		color:0x888888,
+		map: loader.load('https://i.imgur.com/CWHuQSW.jpg') // 1
+	}));
+	matArray.push(new THREE.MeshBasicMaterial( { 
+	color:0x888888,
+		map: loader.load( 'https://i.imgur.com/CWHuQSW.jpg' ) //6
+	}));
+	matArray.push(new THREE.MeshBasicMaterial({
+	color:0x888888,
+		map: loader.load('https://i.imgur.com/JdsarC2.jpg') //2
+	}));
+	matArray.push(new THREE.MeshBasicMaterial({
+	color:0x888888,
+		map: loader.load('https://i.imgur.com/JdsarC2.jpg') //5
+	}));
+	matArray.push(new THREE.MeshBasicMaterial({
+	color:0x888888,
+		map: loader.load('https://i.imgur.com/AW9onLK.jpg') //3
+	}));
+	matArray.push(new THREE.MeshBasicMaterial({
+	color:0x888888,
+		map: loader.load('https://i.imgur.com/AW9onLK.jpg') //4
+	}));
+	let goods = new THREE.Mesh( new THREE.BoxGeometry(0.6,0.3,0.4), matArray);	
+	goods.scale.set(0.5, 0.5,0.5)
+	//goods.position.y = 1.25/2;
+	//goods.visible = true;
+	goods.position.y = -1000;
+	goods.castShadow = true;
+	goods.receiveShadow = true;
+	smoothedRoot3.add(goods);
+	// add a transparent ground-plane shadow-receiver
+	var material = new THREE.ShadowMaterial();
+	//var material = new THREE.MeshLambertMaterial({color:0xffff00, side:THREE.DoubleSide});
+
+	material.opacity = 0.7; //! bug in threejs. can't set in constructor
+
+	var geometry = new THREE.PlaneGeometry(30, 30) // should be large enough
+	var planeMesh = new THREE.Mesh( geometry, material);
+	planeMesh.visible = false;
+	planeMesh.receiveShadow = true;
+	planeMesh.depthWrite = false;
+	planeMesh.rotation.x = -Math.PI/2
+	smoothedRoot3.add(planeMesh);	
+	
+		
+	return markerA;
+}	
+
+function animate() {
+
+	
+	requestAnimationFrame(animate);
+	if( arToolkitSource.ready === false )	return
+	arToolkitContext.update( arToolkitSource.domElement )
+	//console.log(markerA.visible)
+	/////////////////////////////////////////////////////////////////////////////////
+	if(theObject4 !== undefined){
+		if(theObject4.position.x > -5 && carTurn == false)
+			theObject4.position.x -= 0.005;
+		else {
+			carTurn = true;
+			if(carFirst){
+				carFirst = false;
+				theObject4.rotation.z = 0;
+				theObject4.position.z += 1.3
+			}
+			theObject4.position.x += 0.005;
+		}
+		console.log(theObject4.position.x)
+
+	}
+	let dt = clock.getDelta();
+	// not in thrust+/- mode, activate hoverServo
+	if (omegaGain === 1.0) 
+		omega = hoverServo(body, dt);
+	else
+		omega = omegaGain*omegaHover;  // this looks much better
+	omega = Math.clamp (omega, 0, 50);
+  
+	if (! turning) {
+		rYaw = yawServo (body, dt);
+		rYaw = Math.clamp (rYaw, -omega, omega);
+	}  
+	// always activate rollServo and pitchServo
+  	rRoll = rollServo (body, dt);
+  	rRoll = Math.clamp (rRoll, -omega*0.15, omega*0.15);
+	rPitch = pitchServo (body, dt);
+	rPitch = Math.clamp (rPitch, -omega*0.15, omega*0.15);
+  
+	omega0 = omega - rYaw - rRoll - rPitch;
+	omega1 = omega + rYaw - rRoll + rPitch;
+	omega2 = omega - rYaw + rRoll + rPitch;
+	omega3 = omega + rYaw + rRoll - rPitch;
+	body.torque = new CANNON.Vec3(0,0,0);
+	body.angularDamping = 0.39
+	body.linearDamping = 0.39
+
+	body.applyLocalForce (new CANNON.Vec3(0,PROP_KK*omega0*omega0,0), new CANNON.Vec3(-1.0*SIZE, 0, SIZE) )
+	body.applyLocalForce (new CANNON.Vec3(0,PROP_KK*omega1*omega1,0), new CANNON.Vec3(-1.0*SIZE, 0, -SIZE) )
+	body.applyLocalForce (new CANNON.Vec3(0,PROP_KK*omega2*omega2,0), new CANNON.Vec3( 1.0*SIZE, 0, -SIZE) )
+	body.applyLocalForce (new CANNON.Vec3(0,PROP_KK*omega3*omega3,0), new CANNON.Vec3( 1.0*SIZE, 0, SIZE) )	  
+	let KT = 0.1;
+	// need to add the last argument
+	if(arrived == false){
+		body.torque.vadd (new CANNON.Vec3(0, -KT*omega0*omega0,0), body.torque);
+		body.torque.vadd (new CANNON.Vec3(0,  KT*omega1*omega1,0), body.torque);
+		body.torque.vadd (new CANNON.Vec3(0, -KT*omega2*omega2,0), body.torque);
+		body.torque.vadd (new CANNON.Vec3(0,  KT*omega3*omega3,0), body.torque);	
+	}
+	/*markerKanji.children[0].children[25].rotation.z += omega0*dt;
+	markerKanji.children[0].children[26].rotation.z -= omega1*dt;
+	markerKanji.children[0].children[27].rotation.z += omega2*dt;
+	markerKanji.children[0].children[28].rotation.z -= omega3*dt;	*/
+	markerKanji.children[0].children[25].rotation.z += omega0*dt;
+	markerKanji.children[0].children[26].rotation.z -= omega1*dt;
+	markerKanji.children[0].children[27].rotation.z += omega2*dt;
+	markerKanji.children[0].children[28].rotation.z -= omega3*dt;
+	smoothedRoot2.children[0].children[25].rotation.z += omega0*dt;
+	smoothedRoot2.children[0].children[26].rotation.z -= omega1*dt;
+	smoothedRoot2.children[0].children[27].rotation.z += omega2*dt;
+	smoothedRoot2.children[0].children[28].rotation.z -= omega3*dt;	
+	smoothedRoot3.children[0].children[25].rotation.z += omega0*dt;
+	smoothedRoot3.children[0].children[26].rotation.z -= omega1*dt;
+	smoothedRoot3.children[0].children[27].rotation.z += omega2*dt;
+	smoothedRoot3.children[0].children[28].rotation.z -= omega3*dt;	
+	/////////////////////////////////////////////////////////////////////////////////
+	//if(markerKanji.visible == true && markerHiro.visible == true)
+	if(markerKanji.visible == true && smoothedRoot2.visible == true)
+		firstStep = true;
+	else if(smoothedRoot3.visible == true && smoothedRoot2.visible == true)
+		secondStep = true;
+	if(firstStep || secondStep){
+		if(getGoods == true){
+			omegaGain /= RATIO;
+			/*markerKanji.children[0].position.y -= 0.01;
+			if(markerKanji.children[0].position.y < 0.2){
+				getGoods = false;
+				omegaGain = 1;
+			}*/
+			markerKanji.children[0].position.y -= 0.01;
+			if(markerKanji.children[0].position.y < 0.2){
+				getGoods = false;
+				omegaGain = 1;
+			}
+		}
+		else if(getGoods == false && flyUp == true){
+			omegaGain *= RATIO;
+			/*markerKanji.children[1].position.copy(markerKanji.children[0].position)
+			markerKanji.children[1].position.y -= 0.3;
+			markerKanji.children[0].position.y += 0.01;
+			if(markerKanji.children[0].position.y > 2){
+				omegaGain = 1;
+				flyUp = false;
+			}		*/	
+			markerKanji.children[1].position.copy(markerKanji.children[0].position)
+			markerKanji.children[1].position.y -= 0.3;
+			markerKanji.children[0].position.y += 0.01;
+			if(markerKanji.children[0].position.y > 2){
+				omegaGain = 1;
+				flyUp = false;
+			}
+		}
+		else {
+
+			/*if(changeMarker == false){
+				markerKanji.children[1].position.copy(markerKanji.children[0].position)
+				markerKanji.children[1].position.y -= 0.2;	
+				markerKanji.children[0].children[25].rotation.z += omega0*dt;
+				markerKanji.children[0].children[26].rotation.z -= omega1*dt;
+				markerKanji.children[0].children[27].rotation.z += omega2*dt;
+				markerKanji.children[0].children[28].rotation.z -= omega3*dt;		
+			}*/
+			if(changeMarker == false){
+				markerKanji.children[1].position.copy(markerKanji.children[0].position)
+				markerKanji.children[1].position.y -= 0.2;	
+				markerKanji.children[0].children[25].rotation.z += omega0*dt;
+				markerKanji.children[0].children[26].rotation.z -= omega1*dt;
+				markerKanji.children[0].children[27].rotation.z += omega2*dt;
+				markerKanji.children[0].children[28].rotation.z -= omega3*dt;		
+			}
+			else if(changeMarker2 == false){
+				smoothedRoot2.children[1].position.copy(smoothedRoot2.children[0].position)
+				smoothedRoot2.children[1].position.y -= 0.2;	
+				smoothedRoot2.children[0].children[25].rotation.z += omega0*dt;
+				smoothedRoot2.children[0].children[26].rotation.z -= omega1*dt;
+				smoothedRoot2.children[0].children[27].rotation.z += omega2*dt;
+				smoothedRoot2.children[0].children[28].rotation.z -= omega3*dt;					
+			}
+			else if(arrived == false){
+				smoothedRoot3.children[1].position.copy(smoothedRoot3.children[0].position)
+				smoothedRoot3.children[1].position.y -= 0.2;	
+				smoothedRoot3.children[0].children[25].rotation.z += omega0*dt;
+				smoothedRoot3.children[0].children[26].rotation.z -= omega1*dt;
+				smoothedRoot3.children[0].children[27].rotation.z += omega2*dt;
+				smoothedRoot3.children[0].children[28].rotation.z -= omega3*dt;		
+			}
+			
+			targetPos=new THREE.Vector3(smoothedRoot2.position.x, smoothedRoot2.position.y, smoothedRoot2.position.z);
+			
+			/*if(markerKanji.children[0].visible == true){
+				moveLength = markerHiro.worldToLocal( markerKanji.children[0].getWorldPosition().clone() )
+				//console.log("1")
+			}*/
+			if(markerKanji.children[0].visible == true){
+				moveLength = smoothedRoot2.worldToLocal( markerKanji.children[0].getWorldPosition().clone() )
+				//console.log("1")
+			}
+			else if(smoothedRoot3.visible == false){
+				moveLength = smoothedRoot2.worldToLocal( smoothedRoot2.children[0].getWorldPosition().clone() )
+				//console.log("2")
+			}
+			else if(smoothedRoot3.visible == true && smoothedRoot3.children[0].visible == false){
+				moveLength = smoothedRoot3.worldToLocal( smoothedRoot2.children[0].getWorldPosition().clone() )
+				//console.log("3")
+			}
+			else {
+				moveLength = smoothedRoot3.worldToLocal( smoothedRoot3.children[0].getWorldPosition().clone() )
+				//console.log("4")
+			}
+			//console.log(arrived)
+			if(arrived == false){
+				
+				rYaw = 0;
+				turning = false;	
+				var localY, localZ;
+				localY = body.vectorToWorldFrame (new CANNON.Vec3(0,1,0) );
+				localZ = body.vectorToWorldFrame (new CANNON.Vec3(0,0,1) );
+				var yL = new THREE.Vector3 (localY.x, localY.y, localY.z);
+				
+				var x =new THREE.Vector3(moveLength.clone().normalize().x,moveLength.clone().normalize().y,moveLength.clone().normalize().z);
+				var zL = new THREE.Vector3 (localZ.x, localZ.y, localZ.z);
+				var zW = new THREE.Vector3 (0,0,1);
+				var v = zW.projectOnPlane (yL);
+				var yawAngle =  rotateAlongAxisTo (x, yL, zL);
+				if(yawAngle - 0.2 > 0) {
+					rYaw = -omegaHover*0.02;
+					turning = true;
+				}
+				if(yawAngle + 0.2 < 0){
+					rYaw = omegaHover*0.02;
+					turning = true;
+				}
+				if(smoothedRoot3.visible == false)
+					targetPosx=new THREE.Vector3(0, smoothedRoot2.position.y, smoothedRoot2.position.z);
+				else 
+					targetPosx=new THREE.Vector3(0, smoothedRoot3.position.y, smoothedRoot3.position.z);
+				/*
+				if(markerKanji.children[0].visible == true)
+					orientationx=targetPosx.sub( markerKanji.children[0].getWorldPosition().clone())
+				*/
+				if(markerKanji.children[0].visible == true)
+					orientationx=targetPosx.sub( markerKanji.children[0].getWorldPosition().clone())
+				else if(smoothedRoot2.children[0].visible == true)
+					orientationx=targetPosx.sub( smoothedRoot2.children[0].getWorldPosition().clone())
+				else 
+					orientationx=targetPosx.sub( smoothedRoot3.children[0].getWorldPosition().clone())
+					
+				var z = zW.projectOnPlane(orientationx);
+				pitchRef = 0;
+				pitching=false;	
+				if(z.z > 0){
+					pitchRef = -0.02;
+					pitching=true;
+				}
+				if(z.z < 0){
+					 pitchRef = 0.02;
+					 pitching=true;
+				}
+			}
+			else{
+				rYaw = 0;
+				turning = false;
+				pitchRef = 0;
+				pitching=false;	
+			}
+			var length1, length2, length3;
+			//if(markerKanji.children[0].visible == true){
+			if(markerKanji.children[0].visible == true){
+				//length1 = Math.pow((markerKanji.children[0].getWorldPosition().x - markerKanji.getWorldPosition().x), 2) + Math.pow((markerKanji.children[0].getWorldPosition().y - markerKanji.getWorldPosition().y), 2) + Math.pow((markerKanji.children[0].getWorldPosition().z - markerKanji.getWorldPosition().z), 2)
+				length1 = Math.pow((markerKanji.children[0].getWorldPosition().x - markerKanji.getWorldPosition().x), 2) + Math.pow((markerKanji.children[0].getWorldPosition().y - markerKanji.getWorldPosition().y), 2) + Math.pow((markerKanji.children[0].getWorldPosition().z - markerKanji.getWorldPosition().z), 2)
+				//length2 = Math.pow((markerKanji.children[0].getWorldPosition().x - markerHiro.getWorldPosition().x), 2) + Math.pow((markerKanji.children[0].getWorldPosition().y - markerHiro.getWorldPosition().y), 2) + Math.pow((markerKanji.children[0].getWorldPosition().z - markerHiro.getWorldPosition().z), 2)	
+				length2 = Math.pow((markerKanji.children[0].getWorldPosition().x - smoothedRoot2.getWorldPosition().x), 2) + Math.pow((markerKanji.children[0].getWorldPosition().y - smoothedRoot2.getWorldPosition().y), 2) + Math.pow((markerKanji.children[0].getWorldPosition().z - smoothedRoot2.getWorldPosition().z), 2)					
+			}
+			else if(smoothedRoot2.children[0].visible == true){
+				//length1 = Math.pow((markerHiro.children[0].getWorldPosition().x - markerKanji.getWorldPosition().x), 2) + Math.pow((markerHiro.children[0].getWorldPosition().y - markerKanji.getWorldPosition().y), 2) + Math.pow((markerHiro.children[0].getWorldPosition().z - markerKanji.getWorldPosition().z), 2)
+				length1 = Math.pow((smoothedRoot2.children[0].getWorldPosition().x - markerKanji.getWorldPosition().x), 2) + Math.pow((smoothedRoot2.children[0].getWorldPosition().y - markerKanji.getWorldPosition().y), 2) + Math.pow((smoothedRoot2.children[0].getWorldPosition().z - markerKanji.getWorldPosition().z), 2)
+				
+				length2 = Math.pow((smoothedRoot2.children[0].getWorldPosition().x - smoothedRoot2.getWorldPosition().x), 2) + Math.pow((smoothedRoot2.children[0].getWorldPosition().y - smoothedRoot2.getWorldPosition().y), 2) + Math.pow((smoothedRoot2.children[0].getWorldPosition().z - smoothedRoot2.getWorldPosition().z), 2)
+				if(smoothedRoot3.visible == true){
+					length3 = Math.pow((smoothedRoot2.children[0].getWorldPosition().x - smoothedRoot3.getWorldPosition().x), 2) + Math.pow((smoothedRoot2.children[0].getWorldPosition().y - smoothedRoot3.getWorldPosition().y), 2) + Math.pow((smoothedRoot2.children[0].getWorldPosition().z - smoothedRoot3.getWorldPosition().z), 2)
+				}
+			}
+			
+			if(length1 > length2 && changeMarker == false){
+				changeMarker = true;			
+				//markerKanji.children[0].matrixAutoUpdate = false;
+				//markerHiro.children[0].matrixAutoUpdate = false;
+				//markerKanji.matrixAutoUpdate = false;
+				//markerHiro.matrixAutoUpdate = false;
+				//marker1的
+				//var location = markerHiro.worldToLocal( markerKanji.children[0].getWorldPosition().clone())
+				var location = smoothedRoot2.worldToLocal( markerKanji.children[0].getWorldPosition().clone())
+				
+				var qu1 = new THREE.Matrix4();
+				var qu2 = new THREE.Matrix4();
+				var qu3 = new THREE.Matrix4();
+				//qu1 = markerKanji.clone().matrix.multiply(markerKanji.children[0].clone().matrix)
+				qu1 = markerKanji.clone().matrix.multiply(markerKanji.children[0].clone().matrix)
+				var b = true;
+				qu2 = smoothedRoot2.clone().matrix.getInverse(smoothedRoot2.clone().matrix, b)
+				qu3 = qu2.multiply(qu1)
+
+				//markerHiro.children[0].matrix.copyPosition(markerKanji.children[0].matrix)
+				smoothedRoot2.children[0].position.copy(location)
+				//markerHiro.children[0].matrix.copy(qu3)
+				for(i = 0;i < 3;i ++){
+					smoothedRoot2.children[i].visible = true;
+					markerKanji.children[i].visible = false;
+				}	
+				markerKanji.children[0].visible = false;
+				directionalLight.target = smoothedRoot2.children[0]
+				//console.log(directionalLight.target)
+			}
+			if(length2 > length3 && changeMarker2 == false){
+				//console.log("changeMarker2");
+				changeMarker2 = true;
+				var location = smoothedRoot3.worldToLocal( smoothedRoot2.children[0].getWorldPosition().clone())
+				smoothedRoot3.children[0].position.copy(location)
+				for(i = 0;i < 3;i ++){
+					smoothedRoot3.children[i].visible = true;
+					smoothedRoot2.children[i].visible = false;
+				}	
+				markerHiro.children[0].visible = false;
+				directionalLight.target = smoothedRoot3.children[0]
+			}
+			if(smoothedRoot3.children[0].visible == true && smoothedRoot3.visible == true){
+				var moveLength2 = smoothedRoot3.children[0].position
+				if(smoothedRoot3.children[0].position.x.toFixed(1) == 0 && smoothedRoot3.children[0].position.z.toFixed(1) == 0){
+					arrived = true;
+				}
+				if(arrived == true){
+					if(smoothedRoot3.children[1].position.y > 0.05){
+						smoothedRoot3.children[1].position.y -= 0.05;
+					}
+					else{
+						smoothedRoot3.children[1].position.y = 0;
+					}
+				}
+			}
+		}
+	}
+	render();
+	stats.update();
+}
+function render() {
+	updatePhysics();
+	smoothedControls2.update(markerHiro);
+	smoothedControls3.update(markerA);
+	renderer.render(scene, camera);
+}
+
+function updatePhysics() {
+	var timeStep=1/60;
+	world.step(timeStep);
+	/*if(changeMarker == true && nowMarker == 2){
+		var changePosition;
+		changeMarker = false;
+	}
+	else if(changeMarker == true && nowMarker == 1){
+		var changePosition;
+		changePosition = markerKanji.worldToLocal(markerHiro.children[0].getWorldPosition());
+		body.position.copy(changePosition);
+		changeMarker = false;	
+	}
+*/
+	/*if(markerKanji.children[0].visible == true){
+		markerKanji.children[0].position.copy(body.position);
+		markerKanji.children[0].quaternion.copy(body.quaternion);
+		markerKanji.children[1].quaternion.copy(body.quaternion);
+	}*/
+	if(markerKanji.children[0].visible == true){
+		markerKanji.children[0].position.copy(body.position);
+		markerKanji.children[0].quaternion.copy(body.quaternion);
+		markerKanji.children[1].quaternion.copy(body.quaternion);
+	}
+	else if(smoothedRoot2.children[0].visible == true){
+		if(first){
+			first = 0;
+			//changePosition = markerHiro.worldToLocal(markerKanji.children[0].getWorldPosition());
+			changePosition = smoothedRoot2.worldToLocal(markerKanji.children[0].getWorldPosition());
+			body.position.copy(changePosition);
+		}
+		/*markerHiro.children[0].position.copy(body.position);
+		markerHiro.children[0].quaternion.copy(body.quaternion);	
+		markerHiro.children[1].quaternion.copy(body.quaternion);	*/	
+		smoothedRoot2.children[0].position.copy(body.position);
+		smoothedRoot2.children[0].quaternion.copy(body.quaternion);	
+		smoothedRoot2.children[1].quaternion.copy(body.quaternion);	
+	}
+	else if(smoothedRoot3.children[0].visible == true){
+		if(first2){
+			first2 = 0;
+			changePosition = smoothedRoot3.worldToLocal(smoothedRoot2.children[0].getWorldPosition());
+			body.position.copy(changePosition);
+		}
+		smoothedRoot3.children[0].position.copy(body.position);
+		smoothedRoot3.children[0].quaternion.copy(body.quaternion);	
+		smoothedRoot3.children[1].quaternion.copy(body.quaternion);		
+	}
+	yawAngle = getBodyYaw2(body);
+	rollAngle = getBodyRoll2(body);
+	pitchAngle = getBodyPitch2(body); 
+}
+
+function readModel (targetSize=40) {
+
+  var onProgress = function(xhr) {
+    if (xhr.lengthComputable) {
+      var percentComplete = xhr.loaded / xhr.total * 100;
+      console.log(Math.round(percentComplete, 2) + '% downloaded');
+    }
+  };
+
+  var onError = function(xhr) {};
+
+  var mtlLoader = new THREE.MTLLoader();
+  mtlLoader.setPath('models/');
+  mtlLoader.load('sign.mtl', function(materials) {
+
+    materials.preload();
+
+    var objLoader = new THREE.OBJLoader();
+    objLoader.setMaterials(materials);
+    objLoader.setPath('models/');
+    objLoader.load('sign.obj', function(object) {
+		theObject =  unitize (object, targetSize);
+		//theObject.add ( new THREE.BoxHelper (theObject) )
+		theObject.name = 'OBJ'
+		scene.add (theObject);
+	    /*for(i=0;i<13;i++){
+	      theObject.children[0].children[i].castShadow = true;
+	      theObject.children[0].children[i].receiveShadow = true;
+	    }*/
+	    var theObjects = []
+	    smoothedRoot2.add(theObject);
+	    theObject.scale.set(0.03, 0.03, 0.03)
+
+	    for(i=0;i<10;i++){
+		   	theObjects[i] = theObject.clone();
+		    //markerKanji.add(theObjects[i]);
+	   	}
+	    theObject.position.set(1, 0, 1);
+	    theObjects[0].position.set(-2, 0, 1);
+	    theObjects[1].position.set(-3, 0, 1);
+	    theObjects[2].position.set(-4, 0, 1);
+	    theObjects[3].position.set(-5, 0, 1);
+	    theObjects[4].position.set(-6, 0, 1);
+	    theObjects[5].position.set(-1, 0, -1);
+	    theObjects[6].position.set(-2, 0, -1);
+		theObjects[7].position.set(-3, 0, -1);
+	    theObjects[8].position.set(-4, 0, -1);
+	    theObjects[9].position.set(-5, 0, -1);
+		for(i=10;i<12;i++){
+		   	theObjects[i] = theObject.clone();
+		    //markerHiro.add(theObjects[i]);
+	    }
+	    theObjects[10].position.set(-2, 0, 0)
+	    theObjects[11].position.set(-1, 0, -2)
+	    console.log("theObject")
+
+    }, onProgress, onError);
+
+  });
+  ///////////////////////////////////////////////////////////////////
+
+	var mtlLoader2 = new THREE.MTLLoader();
+	mtlLoader2.setPath('models/');
+	mtlLoader2.load('Military_Canvas.mtl', function(materials) {
+
+    materials.preload(); 
+    //var localPlane = new THREE.Plane( new THREE.Vector3( 0,  -1, 0 ), 50 );
+    //mtlLoader.clippingPlanes = [ localPlane ]  
+
+    var objLoader = new THREE.OBJLoader();
+    objLoader.setMaterials(materials);
+   //var localPlane = new THREE.Plane( new THREE.Vector3( 0,  -1, 0 ), 20 );
+    //objLoader.materials.clippingPlanes=  [localPlane]
+    objLoader.setPath('models/');
+    objLoader.load('Military_Canvas.obj', function(object) {
+    
+    theObject2 =  unitize (object, targetSize);
+   // theObject2.add ( new THREE.BoxHelper (theObject) )
+    theObject2.name = 'OBJ'
+    //markerKanji.add(theObject2)
+	markerKanji.add(theObject2)
+    //theObject2.position.x = 35
+    theObject2.scale.set(0.03, 0.03, 0.03)
+    theObject2.position.set(3.8, -1, 0);
+	//theObject2.rotation.y = Math.PI / 2
+    //console.log(tanks[0])
+    }, onProgress, onError);
+    
+  });
+////////////////////////////////////////////////////////////////////////////////
+
+var mtlLoader3 = new THREE.MTLLoader();
+  mtlLoader3.setPath('models/');
+  mtlLoader3.load('PUSHILIN_house.mtl', function(materials) {
+
+    materials.preload(); 
+    //var localPlane = new THREE.Plane( new THREE.Vector3( 0,  -1, 0 ), 50 );
+    //mtlLoader.clippingPlanes = [ localPlane ]  
+
+    var objLoader = new THREE.OBJLoader();
+    objLoader.setMaterials(materials);
+   //var localPlane = new THREE.Plane( new THREE.Vector3( 0,  -1, 0 ), 20 );
+    //objLoader.materials.clippingPlanes=  [localPlane]
+    objLoader.setPath('models/');
+    objLoader.load('PUSHILIN_house.obj', function(object) {
+    
+    theObject3 =  unitize (object, targetSize);
+    //theObject3.add ( new THREE.BoxHelper (theObject) )
+    theObject3.name = 'OBJ'
+    smoothedRoot3.add(theObject3)
+    //theObject2.position.x = 35
+    theObject3.position.set(0,0, -1)
+    theObject3.scale.set(0.03, 0.03, 0.03)
+    //console.log(tanks[0])
+    }, onProgress, onError);
+    
+  });
+////////////////////////////////////////////////////////////////////////////////
+
+var mtlLoader4 = new THREE.MTLLoader();
+  mtlLoader4.setPath('models/');
+  mtlLoader4.load('Ambulance_01.mtl', function(materials) {
+
+    materials.preload(); 
+    //var localPlane = new THREE.Plane( new THREE.Vector3( 0,  -1, 0 ), 50 );
+    //mtlLoader.clippingPlanes = [ localPlane ]  
+
+    var objLoader = new THREE.OBJLoader();
+    objLoader.setMaterials(materials);
+   //var localPlane = new THREE.Plane( new THREE.Vector3( 0,  -1, 0 ), 20 );
+    //objLoader.materials.clippingPlanes=  [localPlane]
+    objLoader.setPath('models/');
+    objLoader.load('Ambulance_01.obj', function(object) {
+    
+    theObject4 =  unitize (object, targetSize);
+    //theObject3.add ( new THREE.BoxHelper (theObject) )
+    theObject4.name = 'OBJ'
+    //markerKanji.add(theObject4)
+	smoothedRoot.add(theObject4)
+    //theObject2.position.x = 35
+    theObject4.position.set(-0.5,0, -0.6)
+    theObject4.rotation.x = -Math.PI / 2
+    theObject4.rotation.z = Math.PI;
+    theObject4.scale.set(0.02, 0.02, 0.02)
+    //console.log(tanks[0])
+    }, onProgress, onError);
+    
+  });
+
+}
+
+
+////////////////////////////////////////
+// wrap an Object3D around the given object
+// so that it is centered at +Y axis
+// 
+function unitize (object, targetSize) {  
+	
+	// find bounding box of 'object'
+	var box3 = new THREE.Box3();
+	box3.setFromObject (object);
+	var size = new THREE.Vector3();
+	size.subVectors (box3.max, box3.min);
+	var center = new THREE.Vector3();
+	center.addVectors(box3.max, box3.min).multiplyScalar (0.5);
+	
+	console.log ('center: ' + center.x + ', '+center.y + ', '+center.z );
+	console.log ('size: ' + size.x + ', ' +  size.y + ', '+size.z );
+	
+	// uniform scaling according to objSize
+	var objSize = Math.max (size.x, size.y, size.z);
+	var scaleSet = targetSize/objSize;
+				
+	var theObject1 =  new THREE.Object3D();
+	theObject1.add (object);
+
+	object.scale.set (scaleSet, scaleSet, scaleSet);
+
+	//object.position.set (-center.x*scaleSet, -center.y*scaleSet+5, -center.z*scaleSet);
+
+	return theObject1;
+			
+}
+
+</script></body>
+

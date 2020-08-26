@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+
+<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+<!-- three.js library -->
+<script src='build/three.min.js'></script>
+<script src="build/stats.min.js"></script>
+<!-- jsartookit -->
+<script src="vendor/artoolkit.min.js"></script>
+<script src="vendor/artoolkit.api.js"></script>
+<!-- include threex.artoolkit -->
+<script src="src/threex/threex-artoolkitsource.js"></script>
+<script src="src/threex/threex-artoolkitcontext.js"></script>
+<script src="src/threex/threex-arbasecontrols.js"></script>
+<script src="src/threex/threex-armarkercontrols.js"></script>
+
+<script src="https://threejs.org/examples/js/controls/OrbitControls.js"></script>
+<script src="https://code.jquery.com/jquery-2.1.4.min.js"></script>
+<body style='margin : 0px; overflow: hidden; font-family: Monospace;'>
+<div style='font-size:2em;position: absolute; top: 10px; width:100%; text-align: center; z-index: 1;'>
+	 AR Quadcopter
+</div>
+<script>
+
+// global variables
+var renderer, scene, camera, clock, deltaTime = 0, totalTime = 0, ControlPick, ControlRange;
+var stats;
+var markerKanji, markerHiro, markerAr;
+var arToolKitSource, arToolKitContext;
+var directionalLight;
+var raycaster, pickables;
+var showHiro = false;
+var _iOSDevice;
+var moveXCheck = true, moveYCheck = true, moveZCheck = true;
+var moveXCheck2 = true, moveYCheck2 = true, moveZCheck2 = true;
+var moveX = 0, moveY = 0, moveZ = 0, movedX = 0, movedY = 0, movedZ = 0;
+var moveX2 = 0, moveY2 = 0, moveZ2 = 0, movedX2 = 0, movedY2 = 0, movedZ2 = 0;
+var x, y, z, kanjiAirplane, changeMarker = false;
+init();
+animate();
+
+function init() {
+	clock = new THREE.Clock();
+	let _iOSDevice = !!navigator.platform.match(/iPhone|iPod|iPad/);
+
+	console.log ('iOS: ' + _iOSDevice)
+
+
+	// init renderer
+	renderer	= new THREE.WebGLRenderer({
+		// antialias	: true,
+		alpha: true
+	});
+	renderer.shadowMap.type = THREE.PCFSoftShadowMap
+	renderer.shadowMap.enabled = true;
+	renderer.setClearColor(new THREE.Color('lightgrey'), 0)
+	// renderer.setPixelRatio( 1/2 );
+	renderer.setSize( window.innerWidth, window.innerHeight );
+	renderer.domElement.style.position = 'absolute'
+	renderer.domElement.style.top = '0px'
+	renderer.domElement.style.left = '0px'
+	document.body.appendChild( renderer.domElement );
+
+	// init scene and camera
+	scene	= new THREE.Scene();
+
+	var ambient = new THREE.AmbientLight( 0x666666 );
+	scene.add( ambient );
+
+	directionalLight = new THREE.DirectionalLight( 'white' );
+	directionalLight.position.set( 1, 2, 0.3 ).setLength(2)
+
+	directionalLight.shadow.mapSize.set(128,128)
+	directionalLight.shadow.camera.bottom = -0.6
+	directionalLight.shadow.camera.top = 0.6
+	directionalLight.shadow.camera.right = 0.6
+	directionalLight.shadow.camera.left = -0.6
+	directionalLight.castShadow = true;
+	//scene.add(new THREE.CameraHelper( directionalLight.shadow.camera ))
+	scene.add( directionalLight );	
+	//////////////////////////////////////////////////////////////////////////////////
+	//		Initialize a basic camera
+	//////////////////////////////////////////////////////////////////////////////////
+
+	// Create a camera
+	camera = new THREE.Camera();
+	scene.add(camera);
+
+	////////////////////////////////////////////////////////////////////////////////
+	//          handle arToolkitSource
+	////////////////////////////////////////////////////////////////////////////////
+
+	arToolkitSource = new THREEx.ArToolkitSource({
+		// to read from the webcam 
+		sourceType : 'webcam',
+
+		// to read from an image
+		// sourceType : 'image',
+		// sourceUrl : THREEx.ArToolkitContext.baseURL + '../data/images/img.jpg',		
+
+		// to read from a video
+		// sourceType : 'video',
+		// sourceUrl : THREEx.ArToolkitContext.baseURL + '../data/videos/headtracking.mp4',		
+	})
+
+	arToolkitSource.init(function onReady(){
+		onResize()
+	})
+	
+	// handle resize
+	window.addEventListener('resize', function(){
+		onResize()
+	})
+	function onResize(){
+		arToolkitSource.onResize()	
+		arToolkitSource.copySizeTo(renderer.domElement)	
+		if( arToolkitContext.arController !== null ){
+			arToolkitSource.copySizeTo(arToolkitContext.arController.canvas)	
+		}	
+	}
+	////////////////////////////////////////////////////////////////////////////////
+	//          initialize arToolkitContext
+	////////////////////////////////////////////////////////////////////////////////
+	
+	arToolkitContext = new THREEx.ArToolkitContext({
+		//cameraParametersUrl: 'data/camera_para.dat',
+		cameraParametersUrl: THREEx.ArToolkitContext.baseURL + '../data/data/camera_para.dat',
+		detectionMode: 'mono',
+		maxDetectionRate: 30,
+		canvasWidth: 80*3,
+		canvasHeight: 60*3,
+	})
+	// initialize it
+	arToolkitContext.init(function onCompleted(){
+		// copy projection matrix to camera
+		camera.projectionMatrix.copy( arToolkitContext.getProjectionMatrix() );
+	})
+	markerA = addMarkerA();
+	scene.add(markerA);
+	markerKanji = addMarkerKanji();
+	scene.add (markerKanji);
+	markerHiro = addMarkerHiro();
+	scene.add (markerHiro); // hide at first
+	
+	
+	stats = new Stats();
+	document.body.appendChild( stats.dom );
+
+	////////////////////////////////////////////////////////
+	// picker
+	if (_iOSDevice)
+		window.addEventListener('touchstart', onTouchStart, false) 
+	else
+		window.addEventListener ('mousedown', onMouseDown, false);
+	raycaster = new THREE.Raycaster();
+	pickables = [markerKanji];	
+
+
+}
+
+function onTouchStart (event) {
+	console.log ('in touch start')
+
+   if (event.touches.length == 1) {
+        
+		event.preventDefault();
+		let ndcX = ( event.touches[0].pageX / window.innerWidth ) * 2 - 1;
+		let ndcY = - ( event.touches[0].pageY / window.innerHeight ) * 2 + 1;
+	
+		doToggleHiro (ndcX, ndcY);		
+		
+	}	
+}	
+	
+function doToggleHiro (ndcX, ndcY) {
+  	//raycaster.ray.origin.setFromMatrixPosition( camera.matrixWorld );
+	raycaster.ray.origin.set (0,0,0)
+	raycaster.ray.direction.set( ndcX, ndcY, 0.5 ).unproject( camera ).sub( raycaster.ray.origin ).normalize();
+			
+  	var intersects = raycaster.intersectObjects(pickables, true);
+	intersects.length = 1
+  	if (intersects.length > 0) {
+  		console.log ('toggle showHiro');
+ 		showHiro = !showHiro;
+	}
+	//console.log()
+	if (showHiro) {
+		//scene.add (markerHiro)
+		//scene.remove(markerA)
+	}
+
+}
+
+function onMouseDown (event) {
+	event.preventDefault();
+  	let ndcX = (event.clientX / window.innerWidth) * 2 - 1;
+  	let ndcY = -(event.clientY / window.innerHeight) * 2 + 1;
+	doToggleHiro (ndcX, ndcY)  	
+}
+
+function createAirplane(){
+	let loader = new THREE.TextureLoader();
+	loader.crossOrigin = '';
+	var airplane = new THREE.Group();
+	texture = loader.load('https://i.imgur.com/qr8kAad.png');
+	var box = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 7), new THREE.MeshBasicMaterial({
+		color: 0xffffff, 
+		map: texture
+	}));
+	airplane.add(box)
+	box.castShadow = true;
+	box.receiveShadow = true;
+	//////////////////////////////////////////boxLinks
+	let boxLinks = []
+	for (i = 0; i < 4; i++) {
+		boxLinks[i] = new THREE.Mesh(new THREE.BoxGeometry(3, 1, 0.2), new THREE.MeshBasicMaterial({
+		  color: 0x333333,
+		  map: texture
+		}));
+		airplane.add(boxLinks[i])
+		boxLinks[i].castShadow = true;
+		boxLinks[i].receiveShadow = true;
+	}
+	boxLinks[0].position.set(-2.5, 0, 3.0)
+	boxLinks[0].rotation.y = Math.PI / 4
+	boxLinks[1].position.set(-2.5, 0, -3.0)
+	boxLinks[1].rotation.y = -Math.PI / 4
+	boxLinks[2].position.set(2.5, 0, -3.0)
+	boxLinks[2].rotation.y = Math.PI / 4
+	boxLinks[3].position.set(2.5, 0, 3.0)
+	boxLinks[3].rotation.y = -Math.PI / 4
+	//////////////////////////////////////////motorSides
+	let motorSides = []
+	material = new THREE.MeshBasicMaterial({
+		color: 0x333333,
+		side: THREE.DoubleSide,
+		map: texture
+	})
+	motorSides[0] = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.5, 50, 2, true, 4, 2.5), material)
+	motorSides[0].position.set(-4, 1, 4)
+	motorSides[1] = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.5, 50, 2, true, 2.8, 2.5), material)
+	motorSides[1].position.set(-4, 1, -4)
+	motorSides[2] = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.5, 50, 2, true, 1, 2.5), material)
+	motorSides[2].position.set(4, 1, -4)
+	motorSides[3] = new THREE.Mesh(new THREE.CylinderGeometry(4, 4, 0.5, 50, 2, true, -0.5, 2.5), material)
+	motorSides[3].position.set(4, 1, 4)
+	for (i = 0; i < 4; i++) {
+		airplane.add(motorSides[i])
+		motorSides[i].castShadow = true;
+		motorSides[i].receiveShadow = true;
+	}
+	//////////////////////////////////////////motorCenters
+	let motorCenters = [], motorCenters2 = []
+	for (i = 0; i < 4; i++) {
+		motorCenters[i] = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 3.5, 50), new THREE.MeshBasicMaterial({
+			color: 0xCCCCCC, 
+			map: texture
+		}));
+		airplane.add(motorCenters[i])
+		motorCenters[i].castShadow = true;
+		motorCenters[i].receiveShadow = true;
+	}
+	motorCenters[0].position.set(-4, 0, 4)
+	motorCenters[1].position.set(-4, 0, -4)
+	motorCenters[2].position.set(4, 0, -4)
+	motorCenters[3].position.set(4, 0, 4)
+	for (i = 0; i < 4; i++) {
+		motorCenters2[i] = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 3, 50, 2, true), new THREE.MeshBasicMaterial({
+		color: 0x333333, 
+		map: texture
+	}));
+		airplane.add(motorCenters2[i])
+		motorCenters2[i].castShadow = true;
+		motorCenters2[i].receiveShadow = true;
+	}
+	motorCenters2[0].position.set(-4, -0.5, 4)
+	motorCenters2[1].position.set(-4, -0.5, -4)
+	motorCenters2[2].position.set(4, -0.5, -4)
+	motorCenters2[3].position.set(4, -0.5, 4)
+	//////////////////////////////////////////motorLinks
+	let motorLinks = []
+	for (i = 0; i < 8; i++) {
+		motorLinks[i] = new THREE.Mesh(new THREE.BoxGeometry(4.5, 0.4, 0.2), new THREE.MeshBasicMaterial({
+			color: 0x333333,
+			map: texture
+		}));
+		airplane.add(motorLinks[i])
+		motorLinks[i].castShadow = true;
+		motorLinks[i].receiveShadow = true;
+	}
+	motorLinks[0].position.set(-6, 0, 4)
+	motorLinks[1].position.set(-6, 0, -4)
+	motorLinks[2].position.set(6, 0, -4)
+	motorLinks[3].position.set(6, 0, 4)
+	motorLinks[0].rotation.z = -Math.PI / 6
+	motorLinks[1].rotation.z = -Math.PI / 6
+	motorLinks[2].rotation.z = Math.PI / 6
+	motorLinks[3].rotation.z = Math.PI / 6
+	motorLinks[4].position.set(-4, 0, 6)
+	motorLinks[4].rotation.y = -Math.PI / 2
+	motorLinks[4].rotation.x = -Math.PI / 6
+	motorLinks[5].position.set(-4, 0, -6)
+	motorLinks[5].rotation.y = -Math.PI / 2
+	motorLinks[5].rotation.x = Math.PI / 6
+	motorLinks[6].position.set(4, 0, -6)
+	motorLinks[6].rotation.y = -Math.PI / 2
+	motorLinks[6].rotation.x = Math.PI / 6
+	motorLinks[7].position.set(4, 0, 6)
+	motorLinks[7].rotation.y = -Math.PI / 2
+	motorLinks[7].rotation.x = -Math.PI / 6
+	//////////////////////////////////////////motors
+	var motors = []
+	motorTexture = loader.load('https://i.imgur.com/yCho2gY.png');
+	for(i=0;i<4;i++){
+		motors[i] = new THREE.Mesh(new THREE.PlaneGeometry(7.5, 1), new THREE.MeshPhongMaterial({map:motorTexture,transparent: true, side:THREE.DoubleSide}))
+		motors[i].rotation.x = -Math.PI / 2
+		airplane.add(motors[i])	
+		motors[i].castShadow = true;
+		motors[i].receiveShadow = true;
+	}
+	motors[0].position.set(-4, 1, 4)
+	motors[1].position.set(-4, 1, -4)
+	motors[2].position.set(4, 1, -4)
+	motors[3].position.set(4, 1, 4)
+	return airplane
+}
+
+function addMarkerKanji () {
+	let markerRootKanji = new THREE.Group();
+	var artoolkitMarker = new THREEx.ArMarkerControls(arToolkitContext, markerRootKanji, {
+		type : 'pattern',
+		//patternUrl : 'data/kanji.patt'
+		patternUrl : THREEx.ArToolkitContext.baseURL + '../data/data/patt.kanji'
+	})
+
+	kanjiAirplane = createAirplane();
+	
+	//markerRootKanji.add (kanjiAirplane);
+	let loader = new THREE.TextureLoader();
+	loader.crossOrigin = '';
+	let matArray = [];
+	matArray.push(new THREE.MeshBasicMaterial({
+		color:0x888888,
+		map: loader.load('https://i.imgur.com/WWOkj5I.png') // 1
+	}));
+	matArray.push(new THREE.MeshBasicMaterial( { 
+	color:0x888888,
+		map: loader.load( 'https://i.imgur.com/fjNBGW5.png' ) //6
+	}));
+	matArray.push(new THREE.MeshBasicMaterial({
+	color:0x888888,
+		map: loader.load('https://i.imgur.com/VXHge97.png') //2
+	}));
+	matArray.push(new THREE.MeshBasicMaterial({
+	color:0x888888,
+		map: loader.load('https://i.imgur.com/yNHV74d.png') //5
+	}));
+	matArray.push(new THREE.MeshBasicMaterial({
+	color:0x888888,
+		map: loader.load('https://i.imgur.com/w1V0cxg.png') //3
+	}));
+	matArray.push(new THREE.MeshBasicMaterial({
+	color:0x888888,
+		map: loader.load('https://i.imgur.com/CV7RwOE.png') //4
+	}));
+	kanjiBox = new THREE.Mesh(new THREE.BoxGeometry(5, 5, 5), matArray);
+	kanjiBox.scale.set(0.08,0.08,0.08)
+	//kanjiBox.position.y = 2;
+	markerRootKanji.add (kanjiBox);
+	//kanjiBox.rotation.z = Math.PI / 2
+	kanjiAirplane.position.y = 0.5;
+	kanjiAirplane.scale.set(0.05,0.05,0.05)
+	kanjiAirplane.rotation.x = - Math.PI / 2
+	kanjiAirplane.rotation.y = - Math.PI / 2
+	// point the directionalLight to the marker
+	directionalLight.target = kanjiAirplane
+	var material2 = new THREE.ShadowMaterial();
+
+	material2.opacity = 0.7; 
+
+	let goods = new THREE.Mesh( 
+		new THREE.CubeGeometry(0.5,0.5,0.5), 
+		new THREE.MeshBasicMaterial({color:0xff0000, map:loader.load('https://i.imgur.com/BeokJxu.png'), transparent:true, opacity:0.5}) 
+	);	
+	goods.position.y = 1.25/2;
+	//markerRootKanji.add(goods);
+	
+	
+	var geometry2 = new THREE.PlaneGeometry(30, 30)
+	var planeMesh = new THREE.Mesh( geometry2, material2);
+	planeMesh.receiveShadow = true;
+	planeMesh.depthWrite = false;
+	planeMesh.rotation.x = -Math.PI/2
+	
+	markerRootKanji.add(planeMesh);
+	
+	/// add gridhelper
+	var gridXZ = new THREE.GridHelper(1,10);
+	//markerRootKanji.add (gridXZ);
+	return markerRootKanji;
+}
+
+function addMarkerHiro(){
+	let markerRoot = new THREE.Group()
+
+	var artoolkitMarker = new THREEx.ArMarkerControls(arToolkitContext, markerRoot, {
+		type : 'pattern',
+		//patternUrl : 'data/hiro.patt'
+		patternUrl : THREEx.ArToolkitContext.baseURL + '../data/data/patt.hiro'
+	})
+
+	hiroAirplane = createAirplane();
+	//hiroAirplane.children[0].material.color.setHex( 0x29e2f0 );
+	//markerRoot.add (hiroAirplane);
+	let loader = new THREE.TextureLoader();
+	loader.crossOrigin = '';
+	let matArray = [];
+	matArray.push(new THREE.MeshBasicMaterial({
+		map: loader.load('https://i.imgur.com/MQytTU3.png') // 1
+	}));
+	matArray.push(new THREE.MeshBasicMaterial( { 
+		map: loader.load('https://i.imgur.com/RWTlT3g.png') //6
+	}));
+	matArray.push(new THREE.MeshBasicMaterial({
+		map: loader.load('https://i.imgur.com/751qgGk.png') //2
+	}));
+	matArray.push(new THREE.MeshBasicMaterial({
+		map: loader.load('https://i.imgur.com/eClHDdl.png') //5
+	}));
+	matArray.push(new THREE.MeshBasicMaterial({
+		map: loader.load('https://i.imgur.com/UkEKsfL.png') //3
+	}));
+	matArray.push(new THREE.MeshBasicMaterial({
+		map: loader.load('https://i.imgur.com/amLb5Fr.png') //4
+	}));
+	hiroBox = new THREE.Mesh(new THREE.BoxGeometry(5, 5, 5), matArray);
+	markerRoot.add (hiroBox);
+	
+	hiroBox.visible = false
+	hiroBox.scale.set(0.08,0.08,0.08)
+	hiroAirplane.visible = false
+	hiroAirplane.position.y = 0.5;
+	hiroAirplane.scale.set(0.05,0.05,0.05)
+	hiroAirplane.rotation.x = - Math.PI / 2
+	hiroAirplane.rotation.y = - Math.PI / 2
+	// point the directionalLight to the marker
+	//directionalLight.target = mesh
+
+	// add a transparent ground-plane shadow-receiver
+	var material = new THREE.ShadowMaterial();
+	//var material = new THREE.MeshLambertMaterial({color:0xffff00, side:THREE.DoubleSide});
+	var gate = new THREE.Mesh(new THREE.PlaneGeometry(1.25, 1.25), new THREE.MeshBasicMaterial());
+	//markerRoot.add(gate);
+	material.opacity = 0.7; //! bug in threejs. can't set in constructor
+	var geometry = new THREE.PlaneGeometry(30, 30) // should be large enough
+	var planeMesh = new THREE.Mesh( geometry, material);
+	planeMesh.receiveShadow = true;
+	planeMesh.depthWrite = false;
+	planeMesh.rotation.x = -Math.PI/2
+	markerRoot.add(planeMesh);	
+	
+		
+	return markerRoot;
+}	
+
+function addMarkerA(){
+	let markerA = new THREE.Group()
+
+	var artoolkitMarker = new THREEx.ArMarkerControls(arToolkitContext, markerA, {
+		type : 'pattern',
+		patternUrl : 'data/house.patt'
+	})
+
+	// add a torus knot	
+	/*var geometry	= new THREE.TorusKnotGeometry(0.3,0.1,64,16);
+	var material	= new THREE.MeshNormalMaterial();
+	var mesh	= new THREE.Mesh( geometry, material );
+	mesh.position.y	= 0.5
+	mesh.castShadow = true;
+	mesh.receiveShadow = true;
+	mesh.position.y	= 0.7
+	markerRoot.add (mesh);
+	mesh.scale.set(0.1,0.1,0.1)*/
+	aAirplane = createAirplane();
+	//hiroAirplane.children[0].material.color.setHex( 0x29e2f0 );
+	markerA.add (aAirplane);
+	aAirplane.visible = false
+	aAirplane.position.y = 0.5;
+	aAirplane.scale.set(0.05,0.05,0.05)
+	aAirplane.rotation.x = - Math.PI / 2
+	aAirplane.rotation.y = - Math.PI / 2
+	// point the directionalLight to the marker
+	//directionalLight.target = mesh
+
+	// add a transparent ground-plane shadow-receiver
+	var material = new THREE.ShadowMaterial();
+	//var material = new THREE.MeshLambertMaterial({color:0xffff00, side:THREE.DoubleSide});
+
+	material.opacity = 0.7; //! bug in threejs. can't set in constructor
+
+	var geometry = new THREE.PlaneGeometry(30, 30) // should be large enough
+	var planeMesh = new THREE.Mesh( geometry, material);
+	planeMesh.receiveShadow = true;
+	planeMesh.depthWrite = false;
+	planeMesh.rotation.x = -Math.PI/2
+	markerA.add(planeMesh);	
+	
+		
+	return markerA;
+}	
+var angle = 0, change = false
+function animate() {
+	//requestAnimationFrame (animate);
+	deltaTime = clock.getDelta();
+	render();
+	//deltaTime = clock.getDelta();
+	//totalTime += deltaTime;
+	//console.log(markerHiro.position)
+	if( arToolkitSource.ready === false )	return
+	arToolkitContext.update( arToolkitSource.domElement )
+	//console.log(markerKanji.worldToLocal( markerHiro.position.clone()))
+	//console.log(kanjiAirplane.getWorldPosition())
+	//	console.log(markerKanji.children[0].getWorldPosition().x)
+	//console.log(markerHiro.position, markerHiro.getWorldPosition());
+	//console.log(markerKanji.children[0].getWorldRotation())
+	markerKanji.children[0].updateMatrixWorld( true );
+	var position = new THREE.Vector3();
+	var quaternion = new THREE.Quaternion();
+	var scale = new THREE.Vector3();
+
+	//console.log(position)
+	//console.log(markerKanji.quaternion)
+	//console.log(markerKanji.children[0].matrixWorld)
+
+	//console.log(markerKanji.quaternion)
+	if(markerKanji.visible == true && markerHiro.visible == true){
+		
+		//markerHiro.children[0].rotation.x += 0.1;	
+		var distance = markerKanji.worldToLocal( markerHiro.position.clone())
+		var distance2 = markerKanji.worldToLocal(markerHiro.getWorldPosition().clone())
+		//console.log(distance, distance2)
+		//moveX = (moveX / window.innerWidth) * 2 - 1;
+
+		x = markerKanji.worldToLocal( markerHiro.position.clone()).x
+		y = markerKanji.worldToLocal( markerHiro.position.clone()).y
+		z = markerKanji.worldToLocal( markerHiro.position.clone()).z
+		let pointMiddle = new THREE.Vector3().addVectors( markerKanji.getWorldPosition(), markerHiro.getWorldPosition() ).multiplyScalar(0.5);
+		let middle = markerKanji.worldToLocal( pointMiddle.clone() )
+		let middle2 = markerHiro.worldToLocal( pointMiddle.clone() )
+		//markerKanji.children[0].position.copy(middle)
+		//markerHiro.children[0].position.copy(middle2)
+		var length1, length2;
+		if(markerKanji.children[0].visible == true){
+			var length1 = Math.pow((markerKanji.children[0].getWorldPosition().x - markerKanji.getWorldPosition().x), 2) + Math.pow((markerKanji.children[0].getWorldPosition().y - markerKanji.getWorldPosition().y), 2) + Math.pow((markerKanji.children[0].getWorldPosition().z - markerKanji.getWorldPosition().z), 2)
+			
+			var length2 = Math.pow((markerKanji.children[0].getWorldPosition().x - markerHiro.getWorldPosition().x), 2) + Math.pow((markerKanji.children[0].getWorldPosition().y - markerHiro.getWorldPosition().y), 2) + Math.pow((markerKanji.children[0].getWorldPosition().z - markerHiro.getWorldPosition().z), 2)		
+		}
+		else if(markerHiro.children[0].visible == true){
+			var length1 = Math.pow((markerHiro.children[0].getWorldPosition().x - markerKanji.getWorldPosition().x), 2) + Math.pow((markerHiro.children[0].getWorldPosition().y - markerKanji.getWorldPosition().y), 2) + Math.pow((markerHiro.children[0].getWorldPosition().z - markerKanji.getWorldPosition().z), 2)
+
+			var length2 = Math.pow((markerHiro.children[0].getWorldPosition().x - markerHiro.getWorldPosition().x), 2) + Math.pow((markerHiro.children[0].getWorldPosition().y - markerHiro.getWorldPosition().y), 2) + Math.pow((markerHiro.children[0].getWorldPosition().z - markerHiro.getWorldPosition().z), 2)
+		}
+		//markerKanji.children[0].matrixWorld.decompose( position, quaternion, scale );
+		//console.log(markerKanji.children[0].quaternion)
+		
+		if(length1 > length2 && changeMarker == false){
+			//console.log(markerKanji.quaternion, markerHiro.quaternion)
+			changeMarker = true;			
+			markerKanji.children[0].matrixAutoUpdate = false;
+			//markerHiro.children[0].matrixAutoUpdate = false;
+			markerKanji.matrixAutoUpdate = false;
+			markerHiro.matrixAutoUpdate = false;
+			var localX = new THREE.Vector3();
+			var localY = new THREE.Vector3();
+			var localZ = new THREE.Vector3();
+			//console.log(markerKanji.matrix)
+			//console.log(markerHiro.matrix )			
+			//console.log(markerKanji.children[0].matrixWorld)
+			//console.log(markerHiro.children[0].matrixWorld )
+			var location = markerHiro.worldToLocal( markerKanji.children[0].getWorldPosition().clone())
+			qu1 = new THREE.Matrix4();
+			qu2 = new THREE.Matrix4();
+			qu3 = new THREE.Matrix4();
+			qu1 = markerKanji.clone().matrix.multiply(markerKanji.children[0].clone().matrix)
+			var b = true;
+			qu2 = markerHiro.clone().matrix.getInverse(markerHiro.clone().matrix, b)
+			//console.log(b)
+			qu3 = qu2.multiply(qu1)
+			//console.log(qu1)
+			//console.log(qu2)
+			//console.log(qu3)
+			//console.log(markerKanji.children[0].matrix)
+			//qu2.setFromRotationMatrix(markerKanji.children[0].matrixWorld)
+			//markerKanji.matrix.extractBasis(localX, localY, localZ);
+			//markerKanji.children[0].matrixWorld.makeBasis (localX, localY, localZ);
+			
+			//markerKanji.children[0].matrixWorld.makeRotationFromQuaternion (markerHiro.quaternion);
+			//markerHiro.matrix.copy(markerKanji.matrix)
+			console.log(markerHiro.children[0].position)
+			markerHiro.children[0].matrix.copy(qu3)
+			//markerHiro.children[0].matrix.copy(markerKanji.children[0].matrix)
+			//console.log(qu2)
+			markerHiro.children[0].matrix.copyPosition(markerKanji.children[0].matrix)
+			//markerHiro.children[0].quaternion.copy(markerKanji.quaternion)
+			markerHiro.children[0].position.copy(location)
+			console.log(markerHiro.children[0].position)
+			  var qm = markerKanji.quaternion;
+			  //console.log(markerKanji.quaternion)
+			  qm.slerp(markerHiro.quaternion, 1);
+			  //markerHiro.children[0].matrix.makeRotationFromQuaternion (qm);
+			//qu2 = markerKanji.quaternion.x - markerKanji.quaternion.x
+			//markerHiro.children[0].quaternion.multiply(markerKanji.quaternion)
+			//markerHiro.children[0].matrix.makeRotationFromQuaternion(markerKanji.quaternion.normalize());
+			
+			//console.log(markerKanji.matrix.element)
+					
+			/*  var localX = new THREE.Vector3(markerKanji.quaternion[0],markerKanji.quaternion[1],markerKanji.quaternion[2]);
+			  var localY = new THREE.Vector3(markerKanji.quaternion[4],markerKanji.quaternion[5],markerKanji.quaternion[6]);
+			  var localZ = new THREE.Vector3(markerKanji.quaternion[8],markerKanji.quaternion[9],markerKanji.quaternion[10]);
+			 // localZ.crossVectors (localX, localY);*/
+			//console.log(markerKanji.matrix)
+			//markerHiro.children[0].matrix.makeBasis (localX, localY, localZ);
+			//markerHiro.quaternion.slerp( markerKanji.quaternion, 1 );
+			
+			
+			
+			//markerHiro.quaternion.copy(quaternion);
+			//markerHiro.children[0].rotation.x = rotationX
+			//markerHiro.children[0].rotation.y = 3.14
+			//markerHiro.children[0].copy(markerKanji.children[0])
+			///markerHiro.children[0].position.copy(location);	
+			
+			//markerHiro.children[0].quaternion.w = markerKanji.quaternion.w
+			//console.log(location)
+			//console.log(rotationX, rotationY, rotationZ)
+			markerHiro.children[0].visible = true
+			markerKanji.children[0].visible = false	
+			var moveLength = markerHiro.worldToLocal( markerHiro.children[0].position.clone())		
+			//console.log(markerHiro.children[0].position)
+			//console.log(markerHiro.position)
+			//console.log(moveLength)
+		}
+
+		/*else{
+			changeMarker = true;
+			markerHiro.children[0].visible = false
+			markerKanji.children[0].visible = true				
+		}*/
+			/*if(changeMarker == true && markerKanji.children[0].visible == false){
+				markerHiro.children[0].position.copy(markerKanji.children[0]);
+				//changeMarker = false;
+			}
+			else if(changeMarker == true && markerHiro.children[0].visible == false){
+				markerKanji.children[0].position.copy(markerKanji.children[0]);
+				changeMarker = false;
+			}*/
+		//console.log(moveLength1.x)
+		if(markerKanji.children[0].visible == true){
+			var moveLength1 = markerKanji.children[0].worldToLocal( markerHiro.position.clone())
+			if(moveLength1.x < 0){			
+				markerKanji.children[0].position.x -= 0.01;
+			}
+			if(moveLength1.x > 0){
+				markerKanji.children[0].position.x += 0.01;
+			}
+			if(moveLength1.y < 0){
+				markerKanji.children[0].position.y -= 0.01;
+			}
+			if(moveLength1.y < 0){
+				markerKanji.children[0].position.x += 0.01;
+			}
+			if(moveLength1.z < 0){
+				markerKanji.children[0].position.z -= 0.01;
+			}
+			if(moveLength1.z > 0){
+				markerKanji.children[0].position.z += 0.01;
+			}
+		}
+		if(markerHiro.children[0].visible == true){
+			//markerHiro.children[0].matrixAutoUpdate = true;
+			var moveLength2 = markerHiro.children[0].position
+			console.log("moveLength2", moveLength2);
+			if(moveLength2.x < 0){
+				positionSet = new THREE.Vector3(markerHiro.children[0].position.x += 0.01, markerHiro.children[0].position.y, markerHiro.children[0].position.z)
+				markerHiro.children[0].matrix.setPosition(positionSet)
+				markerHiro.children[0].position.copy(positionSet)
+			}
+			if(moveLength2.x > 0){
+				positionSet = new THREE.Vector3(markerHiro.children[0].position.x -= 0.01, markerHiro.children[0].position.y, markerHiro.children[0].position.z)
+				markerHiro.children[0].matrix.setPosition(positionSet)
+				markerHiro.children[0].position.copy(positionSet)
+			}
+			if(moveLength2.y < 0){
+				positionSet = new THREE.Vector3(markerHiro.children[0].position.x, markerHiro.children[0].position.y += 0.01, markerHiro.children[0].position.z)
+				console.log(positionSet)
+				markerHiro.children[0].matrix.setPosition(positionSet)
+				markerHiro.children[0].position.copy(positionSet)
+			}
+			if(moveLength2.y > 0){
+				positionSet = new THREE.Vector3(markerHiro.children[0].position.x, markerHiro.children[0].position.y -= 0.01, markerHiro.children[0].position.z)
+				console.log(markerHiro.children[0].position)			
+				markerHiro.children[0].matrix.setPosition(positionSet)
+				markerHiro.children[0].position.copy(positionSet)
+			}
+			if(moveLength2.z < 0){
+				positionSet = new THREE.Vector3(markerHiro.children[0].position.x, markerHiro.children[0].position.y, markerHiro.children[0].position.z += 0.01)
+				markerHiro.children[0].matrix.setPosition(positionSet)
+				markerHiro.children[0].position.copy(positionSet)
+			}
+			if(moveLength2.z > 0){
+				positionSet = new THREE.Vector3(markerHiro.children[0].position.x, markerHiro.children[0].position.y, markerHiro.children[0].position.z -= 0.01)
+				markerHiro.children[0].matrix.setPosition(positionSet)
+				markerHiro.children[0].position.copy(positionSet)
+			}
+			//markerHiro.children[0].updateMatrix ()
+		}
+
+		/*if(distance.x < 0 && movedX > distance.x){
+			movedX -= 0.01;
+			if(markerHiro.children[0].visible == false)
+				markerKanji.children[0].position.x -= 0.01;
+			if(markerKanji.children[0].visible == false)
+				markerHiro.children[0].position.x -= 0.01;
+			if(movedX < distance.x) moveXCheck = false;
+		}
+		if(distance.x > 0 && movedX < distance.x){
+			movedX += 0.01;
+			if(markerHiro.children[0].visible == false)markerKanji.children[0].position.x += 0.01;
+			if(markerKanji.children[0].visible == false)markerHiro.children[0].position.x += 0.01;
+			if(movedX > distance.x) moveXCheck = false
+		}
+		
+		if(distance.z < 0 && movedZ > distance.z){
+			movedZ -= 0.01;
+			if(markerHiro.children[0].visible == false)markerKanji.children[0].position.z -= 0.01;
+			if(markerKanji.children[0].visible == false)markerHiro.children[0].position.z -= 0.01;
+			if(movedZ < distance.z) moveZCheck = false
+		}
+		if(distance.z > 0 && movedZ < distance.z){
+			movedZ += 0.01;
+			if(markerHiro.children[0].visible == false)markerKanji.children[0].position.z += 0.01;
+			if(markerKanji.children[0].visible == false)markerHiro.children[0].position.z += 0.01;
+			if(movedZ > distance.z) moveZCheck = false
+		}
+		if(distance.y < 0 && movedY > distance.y){
+			movedY -= 0.01;
+			if(markerHiro.children[0].visible == false)markerKanji.children[0].position.y -= 0.01;
+			if(markerKanji.children[0].visible == false)markerHiro.children[0].position.y -= 0.01;
+			if(movedY < distance.y) moveYCheck = false
+		}
+		if(distance.y > 0 && movedY < distance.y){
+			movedY += 0.01;
+			if(markerHiro.children[0].visible == false)markerKanji.children[0].position.y += 0.01;
+			if(markerKanji.children[0].visible == false)markerHiro.children[0].position.y += 0.01;
+			if(movedY > distance.y) moveYCheck = false
+		}*/
+
+	}
+	else {
+		//markerKanji.children[0].rotation.z = angle
+		//angle += 0.01
+	}
+	//renderer.render(scene,camera);
+	
+	stats.update();
+}
+function render() {
+	//renderer.clear(true);
+	requestAnimationFrame(animate);
+	renderer.render(scene, camera);
+	//renderer.render(dashboard, dashboardCamera);
+
+}
+
+
+
+
+</script></body>
+
